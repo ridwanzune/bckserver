@@ -1,0 +1,215 @@
+
+======================================================================
+  GitHub Action Guide: Automating Dhaka Dispatch News Generator
+======================================================================
+
+This guide explains how to set up a GitHub Action that automatically runs the news generation process for your deployed application using Puppeteer for headless browser automation.
+
+The webhook for reporting is hardcoded as requested: https://hook.eu2.make.com/0ui64t2di3wvvg00fih0d32qp9i9jgme
+
+---
+### Overview of the Process
+---
+
+The workflow will:
+1.  Trigger on a schedule (e.g., daily at 6 PM UTC) or can be run manually.
+2.  Launch a headless Chrome browser using Puppeteer.
+3.  Navigate to your deployed application's URL.
+4.  Enter the password to unlock the application.
+5.  Click the "START AUTOMATION" button.
+6.  Wait until the entire batch process is complete (with a 15-minute timeout).
+7.  Check the final status of all tasks by looking for any errors on the page.
+8.  Send a final status report (SUCCESS or ERROR) to the specified Make.com webhook.
+
+---
+### Step 1: Add the Puppeteer Script to Your Project
+---
+
+Create a new file named `e2e-script.js` in the root of your project with the content provided below. This script contains the browser automation logic.
+
+---
+### Step 2: Add the GitHub Actions Workflow File
+---
+
+Create the directory path `.github/workflows/` in your project root if it doesn't already exist. Inside that directory, create a new file named `run-automation.yml` with the content provided below.
+
+---
+### Step 3: Configure Repository Secrets
+---
+
+For this to work securely, you must store your application's URL and password as encrypted secrets in your GitHub repository.
+
+1.  Navigate to your GitHub repository.
+2.  Go to **Settings** > **Secrets and variables** > **Actions**.
+3.  Click **New repository secret** and add the following:
+    *   **Name:** `APP_URL`
+        **Value:** The full URL of your deployed application (e.g., `https://your-app-name.vercel.app`).
+    *   **Name:** `APP_PASSWORD`
+        **Value:** Your application password (the value of `APP_PASSWORD` from your `constants.ts` file, which is `Dhakadispatch11@`).
+
+---
+### Step 4: Commit and Push
+---
+
+Commit both `e2e-script.js` and `.github/workflows/run-automation.yml` to your repository and push the changes. The action will now be visible under the "Actions" tab of your repository and will run according to the schedule you defined. You can also trigger it manually from there to test it.
+
+---
+### Full Code for Files
+---
+
+#### File 1: `e2e-script.js`
+```javascript
+const puppeteer = require('puppeteer');
+
+const APP_URL = process.env.APP_URL;
+const APP_PASSWORD = process.env.APP_PASSWORD;
+const WEBHOOK_URL = 'https://hook.eu2.make.com/0ui64t2di3wvvg00fih0d32qp9i9jgme';
+
+async function sendStatusUpdate(status, message, details = {}) {
+    try {
+        await fetch(WEBHOOK_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                timestamp: new Date().toISOString(),
+                level: status, // 'SUCCESS' or 'ERROR'
+                message: message,
+                category: 'GitHub Action E2E',
+                details: details
+            }),
+        });
+        console.log(`Successfully sent status update: ${status}`);
+    } catch (error) {
+        console.error('Failed to send status update to webhook:', error);
+    }
+}
+
+async function runAutomation() {
+    if (!APP_URL || !APP_PASSWORD) {
+        throw new Error('APP_URL and APP_PASSWORD environment variables must be set.');
+    }
+
+    console.log('Launching browser...');
+    // The '--no-sandbox' flag is required to run Puppeteer in most CI environments like GitHub Actions
+    const browser = await puppeteer.launch({
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    // Set a generous navigation timeout
+    page.setDefaultNavigationTimeout(120000); // 2 minutes
+
+    try {
+        console.log(`Navigating to ${APP_URL}...`);
+        await page.goto(APP_URL, {
+            waitUntil: 'networkidle0'
+        });
+        console.log('Page loaded. Entering password...');
+
+        // --- Step 1: Unlock the App ---
+        await page.waitForSelector('input[type="password"]', {
+            timeout: 30000
+        });
+        await page.type('input[type="password"]', APP_PASSWORD);
+        await page.click('button[type="submit"]');
+        console.log('Password submitted.');
+
+        // --- Step 2: Start Automation ---
+        // Wait for the main screen and the "START AUTOMATION" button to be ready
+        const startButtonSelector = '//button[contains(text(), "START AUTOMATION")]';
+        await page.waitForXPath(startButtonSelector, {
+            timeout: 30000
+        });
+        const [startButton] = await page.$x(startButtonSelector);
+        await startButton.click();
+        console.log('Automation started. Waiting for completion...');
+
+        // --- Step 3: Wait for Completion ---
+        // The process is complete when the "START AUTOMATION" button is re-enabled.
+        // We give it a 15-minute timeout to be safe.
+        await page.waitForXPath(startButtonSelector, {
+            timeout: 900000
+        }); // 15 minutes
+        console.log('Automation process has finished.');
+
+        // --- Step 4: Check for Errors ---
+        // Scrape the page to see if any tasks resulted in an error state.
+        const hasErrors = await page.evaluate(() => {
+            // The error state is indicated by the 'border-red-500' class in the task display
+            const errorElement = document.querySelector('.border-red-500');
+            return !!errorElement;
+        });
+
+        // --- Step 5: Report to Webhook ---
+        if (hasErrors) {
+            console.log('Errors detected in the batch process.');
+            await sendStatusUpdate('ERROR', 'Automation completed with one or more failed tasks.');
+        } else {
+            console.log('All tasks completed successfully.');
+            await sendStatusUpdate('SUCCESS', 'Automation batch process completed successfully.');
+        }
+
+    } catch (error) {
+        console.error('An error occurred during the automation script:', error);
+        await sendStatusUpdate('ERROR', 'The automation script failed to run to completion.', {
+            error: error.message
+        });
+        // Re-throw the error to make the GitHub Action fail
+        throw error;
+    } finally {
+        console.log('Closing browser.');
+        await browser.close();
+    }
+}
+
+// Add dependencies before running the main function
+(async () => {
+    const {
+        exec
+    } = require('child_process');
+    console.log('Installing puppeteer...');
+    exec('npm install puppeteer', (err, stdout, stderr) => {
+        if (err) {
+            console.error(`exec error: ${err}`);
+            return;
+        }
+        console.log(`stdout: ${stdout}`);
+        console.error(`stderr: ${stderr}`);
+        console.log('Puppeteer installed. Starting automation.');
+        runAutomation();
+    });
+})();
+```
+
+#### File 2: `.github/workflows/run-automation.yml`
+```yaml
+name: Run Dhaka Dispatch Automation
+
+on:
+  # Schedule to run every day at 6:00 PM UTC
+  schedule:
+    - cron: '0 18 * * *'
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Puppeteer Automation Script
+        run: node e2e-script.js
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+
+```

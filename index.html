@@ -4,16 +4,46 @@
   <head>
     <meta charset="UTF-g" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bangla News Content Automator</title>
+    <title>Dhaka Dispatch News Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body {
         font-family: 'Inter', sans-serif;
       }
+      .neo-shadow {
+        box-shadow: 8px 8px 0px #000;
+        transition: box-shadow 0.2s ease-out;
+      }
+      .neo-shadow-sm {
+        box-shadow: 4px 4px 0px #000;
+        transition: all 0.2s ease-out;
+      }
+      .btn-neo:hover {
+        transform: translate(2px, 2px);
+        box-shadow: 2px 2px 0px #000;
+      }
+      .btn-neo:active {
+        transform: translate(4px, 4px);
+        box-shadow: 0px 0px 0px #000;
+      }
+      
+      /* Custom scrollbar for log panel */
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 12px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: #0e7490; /* cyan-700 */
+        border-radius: 10px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background-color: #ec4899; /* pink-500 */
+        border-radius: 10px;
+        border: 3px solid #0e7490; /* cyan-700 */
+      }
     </style>
      <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Poppins:wght@700&display=swap" rel="stylesheet">
   <script type="importmap">
 {
   "imports": {
@@ -22,13 +52,14 @@
     "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
     "@google/genai": "https://esm.sh/@google/genai@^1.11.0",
     "path": "https://esm.sh/path@^0.12.7",
-    "vite": "https://esm.sh/vite@^7.0.6"
+    "vite": "https://esm.sh/vite@^7.0.6",
+    "url": "https://esm.sh/url@^0.11.4"
   }
 }
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-gray-900 text-white">
+  <body class="bg-gray-200">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
