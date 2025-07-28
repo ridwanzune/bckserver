@@ -1,61 +1,46 @@
 import puppeteer from 'puppeteer';
-import fetch from 'node-fetch';
-
-const TARGET_URL = process.env.TARGET_URL;
-const PASSWORD = process.env.PASSWORD;
-const STATUS_WEBHOOK = process.env.STATUS_WEBHOOK;
 
 async function runAutomation() {
-    console.log('Launching browser...');
-    const browser = await puppeteer.launch({ headless: 'new' });
+  console.log('Launching browser...');
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
     const page = await browser.newPage();
 
-    try {
-        console.log(`Navigating to ${TARGET_URL}...`);
-        await page.goto(TARGET_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+    console.log('Navigating to ***...');
+    await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle2' });
 
-        console.log('Page loaded. Entering password...');
-        await page.waitForSelector('input[type="password"]', { timeout: 20000 });
-        await page.type('input[type="password"]', PASSWORD);
-        await page.keyboard.press('Enter');
+    console.log('Page loaded. Entering password...');
+    await page.type('input[type="password"]', process.env.PASSWORD);
+    await page.keyboard.press('Enter');
 
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+    await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
-        const startButtonXPath = '//button[contains(., "START AUTOMATION")]';
-        console.log('Waiting for START AUTOMATION button...');
-        await page.waitForXPath(startButtonXPath, { timeout: 30000 });
+    console.log('Performing post-login actions...');
+    // Example: clicking a button by ID (customize as needed)
+    await page.click('#submitButton');
 
-        const [startButton] = await page.$x(startButtonXPath);
-        if (!startButton) throw new Error('START AUTOMATION button not found.');
-
-        await startButton.click();
-        console.log('Automation started. Waiting for completion...');
-
-        await page.waitForXPath(`${startButtonXPath}[not(@disabled)]`, { timeout: 15 * 60 * 1000 });
-
-        console.log('Automation completed successfully.');
-        await sendStatus('SUCCESS');
-    } catch (error) {
-        console.error('Error in automation:', error);
-        await sendStatus('ERROR');
-    } finally {
-        console.log('Closing browser.');
-        await browser.close();
-    }
+    console.log('Automation steps completed.');
+    await sendStatusUpdate('SUCCESS');
+  } catch (err) {
+    console.error('An error occurred during the automation script:', err);
+    await sendStatusUpdate('ERROR');
+  } finally {
+    console.log('Closing browser.');
+    await browser.close();
+  }
 }
 
-async function sendStatus(status) {
-    if (!STATUS_WEBHOOK) return;
-    try {
-        await fetch(STATUS_WEBHOOK, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status })
-        });
-        console.log(`Status update sent: ${status}`);
-    } catch (err) {
-        console.error('Failed to send status update:', err);
-    }
+async function sendStatusUpdate(status) {
+  const response = await fetch(process.env.STATUS_WEBHOOK, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, timestamp: new Date().toISOString() }),
+  });
+  console.log(`Successfully sent status update: ${status}`);
 }
 
 runAutomation();
