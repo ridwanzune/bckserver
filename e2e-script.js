@@ -28,7 +28,7 @@ async function runAutomation() {
     if (!APP_URL || !APP_PASSWORD) {
         console.error('APP_URL and APP_PASSWORD environment variables must be set.');
         await sendStatusUpdate('ERROR', 'Environment variables not configured in GitHub repository secrets.');
-        throw new Error('APP_URL and APP_PASSWORD environment variables must be set.');
+        throw new Error('Missing environment variables.');
     }
 
     console.log('Launching browser...');
@@ -43,29 +43,24 @@ async function runAutomation() {
         await page.goto(APP_URL, { waitUntil: 'networkidle0' });
         console.log('Page loaded. Entering password...');
 
-        // Step 1: Unlock the App
         await page.waitForSelector('input[type="password"]', { timeout: 30000 });
         await page.type('input[type="password"]', APP_PASSWORD);
         await page.click('button[type="submit"]');
         console.log('Password submitted.');
 
-        // Step 2: Start Automation
-        const startButtonSelector = '//button[contains(text(), "START AUTOMATION")]';
-        await page.waitForXPath(startButtonSelector, { timeout: 30000 });
-        const [startButton] = await page.$x(startButtonSelector);
+        const startButtonXPath = '//button[contains(., "START AUTOMATION")]';
+        await page.waitForSelector(`xpath/${startButtonXPath}`, { timeout: 30000 });
+        const [startButton] = await page.$x(startButtonXPath);
         await startButton.click();
         console.log('Automation started. Waiting for completion...');
 
-        // Step 3: Wait for Completion
-        await page.waitForXPath(`${startButtonSelector}[not(@disabled)]`, { timeout: 900000 });
+        await page.waitForSelector(`xpath/${startButtonXPath}[not(@disabled)]`, { timeout: 900000 }); // 15 mins
         console.log('Automation process has finished.');
 
-        // Step 4: Check for Errors on Page
         const hasErrors = await page.evaluate(() => {
             return !!document.querySelector('.border-red-500');
         });
 
-        // Step 5: Report Final Status
         if (hasErrors) {
             console.log('Errors detected in the batch process.');
             await sendStatusUpdate('ERROR', 'Automation completed with one or more failed tasks.');
