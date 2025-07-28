@@ -1,4 +1,5 @@
-const puppeteer = require('puppeteer');
+// Using ES Module imports, compatible with "type": "module" in package.json
+import puppeteer from 'puppeteer';
 
 const APP_URL = process.env.APP_URL;
 const APP_PASSWORD = process.env.APP_PASSWORD;
@@ -8,12 +9,10 @@ async function sendStatusUpdate(status, message, details = {}) {
     try {
         await fetch(WEBHOOK_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 timestamp: new Date().toISOString(),
-                level: status, // 'SUCCESS' or 'ERROR'
+                level: status,
                 message: message,
                 category: 'GitHub Action E2E',
                 details: details
@@ -27,55 +26,46 @@ async function sendStatusUpdate(status, message, details = {}) {
 
 async function runAutomation() {
     if (!APP_URL || !APP_PASSWORD) {
+        console.error('APP_URL and APP_PASSWORD environment variables must be set.');
+        await sendStatusUpdate('ERROR', 'Environment variables not configured in GitHub repository secrets.');
         throw new Error('APP_URL and APP_PASSWORD environment variables must be set.');
     }
 
     console.log('Launching browser...');
-    // The '--no-sandbox' flag is required to run Puppeteer in most CI environments like GitHub Actions
     const browser = await puppeteer.launch({
         args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     const page = await browser.newPage();
-    // Set a generous navigation timeout
     page.setDefaultNavigationTimeout(120000); // 2 minutes
 
     try {
         console.log(`Navigating to ${APP_URL}...`);
-        await page.goto(APP_URL, {
-            waitUntil: 'networkidle0'
-        });
+        await page.goto(APP_URL, { waitUntil: 'networkidle0' });
         console.log('Page loaded. Entering password...');
 
-        // --- Step 1: Unlock the App ---
-        await page.waitForSelector('input[type="password"]', {
-            timeout: 30000
-        });
+        // Step 1: Unlock the App
+        await page.waitForSelector('input[type="password"]', { timeout: 30000 });
         await page.type('input[type="password"]', APP_PASSWORD);
         await page.click('button[type="submit"]');
         console.log('Password submitted.');
 
-        // --- Step 2: Start Automation ---
+        // Step 2: Start Automation
         const startButtonSelector = '//button[contains(text(), "START AUTOMATION")]';
-        await page.waitForXPath(startButtonSelector, {
-            timeout: 30000
-        });
+        await page.waitForXPath(startButtonSelector, { timeout: 30000 });
         const [startButton] = await page.$x(startButtonSelector);
         await startButton.click();
         console.log('Automation started. Waiting for completion...');
 
-        // --- Step 3: Wait for Completion ---
-        await page.waitForXPath(startButtonSelector, {
-            timeout: 900000
-        }); // 15 minutes
+        // Step 3: Wait for Completion
+        await page.waitForXPath(`${startButtonSelector}[not(@disabled)]`, { timeout: 900000 });
         console.log('Automation process has finished.');
 
-        // --- Step 4: Check for Errors ---
+        // Step 4: Check for Errors on Page
         const hasErrors = await page.evaluate(() => {
-            const errorElement = document.querySelector('.border-red-500');
-            return !!errorElement;
+            return !!document.querySelector('.border-red-500');
         });
 
-        // --- Step 5: Report to Webhook ---
+        // Step 5: Report Final Status
         if (hasErrors) {
             console.log('Errors detected in the batch process.');
             await sendStatusUpdate('ERROR', 'Automation completed with one or more failed tasks.');
@@ -96,19 +86,4 @@ async function runAutomation() {
     }
 }
 
-(async () => {
-    const {
-        exec
-    } = require('child_process');
-    console.log('Installing puppeteer...');
-    exec('npm install puppeteer', (err, stdout, stderr) => {
-        if (err) {
-            console.error(`exec error: ${err}`);
-            return;
-        }
-        console.log(`stdout: ${stdout}`);
-        console.error(`stderr: ${stderr}`);
-        console.log('Puppeteer installed. Starting automation.');
-        runAutomation();
-    });
-})();
+runAutomation().catch(() => process.exit(1));
