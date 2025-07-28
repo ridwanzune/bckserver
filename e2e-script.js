@@ -5,18 +5,24 @@ const APP_URL      = process.env.APP_URL;
 const APP_PASSWORD = process.env.APP_PASSWORD;
 const WEBHOOK_URL  = 'https://hook.eu2.make.com/0ui64t2di3wvvg00fih0d32qp9i9jgme';
 
+// Wait until an XPath selector matches something in the DOM
+async function waitForXPath(page, xpath, timeout = 30000) {
+  await page.waitForFunction(
+    (xp) => {
+      const result = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      return !!result.singleNodeValue;
+    },
+    { timeout },
+    xpath
+  );
+}
+
 async function sendStatus(status, message = '', details = {}) {
   try {
     await fetch(WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: status,
-        message,
-        category: 'GitHub Action E2E',
-        details
-      }),
+      body: JSON.stringify({ timestamp: new Date().toISOString(), level: status, message, category: 'GitHub Action E2E', details }),
     });
     console.log(`Status sent: ${status}`);
   } catch (e) {
@@ -47,21 +53,23 @@ async function sendStatus(status, message = '', details = {}) {
     await page.type('input[type="password"]', APP_PASSWORD);
     await page.click('button[type="submit"]');
 
-    // **Instead of waiting for navigation**, wait for your START button:
+    // Wait for the START AUTOMATION button to appear
     const btnXPath = "//button[contains(., 'START AUTOMATION')]";
     console.log('Waiting for START AUTOMATION button to appear…');
-    await page.waitForXPath(btnXPath, { timeout: 60000 });
+    await waitForXPath(page, btnXPath, 60000);
 
-    // Now click the button
+    // Click the button
     const [btn] = await page.$x(btnXPath);
     if (!btn) throw new Error('START AUTOMATION button not found');
     await btn.click();
     console.log('Clicked START AUTOMATION — waiting for completion…');
 
-    // Wait for button to re-enable (indicates finish)
-    await page.waitForXPath(`${btnXPath}[not(@disabled)]`, { timeout: 900000 });
+    // Wait for the button to re-enable (i.e. no @disabled)
+    const reenableXPath = `${btnXPath}[not(@disabled)]`;
+    console.log('Waiting for process to finish (button re-enable)…');
+    await waitForXPath(page, reenableXPath, 900000);
 
-    // Check for any error indicators
+    // Check for errors in the page
     const hasErrors = await page.evaluate(() => !!document.querySelector('.border-red-500'));
     if (hasErrors) {
       console.log('Process finished with errors');
