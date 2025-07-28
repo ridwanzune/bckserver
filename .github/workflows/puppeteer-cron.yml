@@ -2,7 +2,7 @@ name: Run Puppeteer Daily
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # Adjust UTC time
+    - cron: '53 5 * * *'  # Adjust UTC time
   workflow_dispatch:
 
 jobs:
