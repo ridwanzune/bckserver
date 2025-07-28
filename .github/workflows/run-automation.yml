@@ -2,27 +2,24 @@ name: Run Dhaka Dispatch Automation
 
 on:
   schedule:
-    - cron: '0 15 * * *'   # daily at 6 PM UTC
-  workflow_dispatch:      # manual trigger
+    - cron: '0 18 * * *'    # daily @ 6 PM UTC
+  workflow_dispatch:
 
 jobs:
-  run-automation:
+  run:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
+      - run: npm install
 
-      - name: Run Puppeteer Automation Script
+      - name: Run automation
         run: node e2e-script.js
         env:
-          APP_URL: ${{ secrets.APP_URL }}
+          APP_URL:      ${{ secrets.APP_URL }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
