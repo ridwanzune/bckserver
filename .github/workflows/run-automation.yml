@@ -2,7 +2,7 @@ name: Run Dhaka Dispatch Automation
 
 on:
   schedule:
-    - cron: '0 18 * * *'    # daily @ 6 PM UTC
+    - cron: '0 17 * * *'    # daily @ 6 PM UTC
   workflow_dispatch:
 
 jobs:
