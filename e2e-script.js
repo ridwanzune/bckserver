@@ -1,8 +1,5 @@
 import puppeteer from 'puppeteer';
 import fetch from 'node-fetch';
-import dotenv from 'dotenv';
-
-dotenv.config();
 
 const TARGET_URL = process.env.TARGET_URL;
 const PASSWORD = process.env.PASSWORD;
@@ -22,30 +19,24 @@ async function runAutomation() {
         await page.type('input[type="password"]', PASSWORD);
         await page.keyboard.press('Enter');
 
-        // Wait for the dashboard to load
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
 
-        // XPath selector for the start button
         const startButtonXPath = '//button[contains(., "START AUTOMATION")]';
-
         console.log('Waiting for START AUTOMATION button...');
         await page.waitForXPath(startButtonXPath, { timeout: 30000 });
 
         const [startButton] = await page.$x(startButtonXPath);
-        if (!startButton) {
-            throw new Error('START AUTOMATION button not found.');
-        }
+        if (!startButton) throw new Error('START AUTOMATION button not found.');
 
         await startButton.click();
         console.log('Automation started. Waiting for completion...');
 
-        // Wait for button to become enabled again
         await page.waitForXPath(`${startButtonXPath}[not(@disabled)]`, { timeout: 15 * 60 * 1000 });
 
         console.log('Automation completed successfully.');
         await sendStatus('SUCCESS');
     } catch (error) {
-        console.error('An error occurred during the automation script:', error);
+        console.error('Error in automation:', error);
         await sendStatus('ERROR');
     } finally {
         console.log('Closing browser.');
@@ -61,7 +52,7 @@ async function sendStatus(status) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status })
         });
-        console.log(`Successfully sent status update: ${status}`);
+        console.log(`Status update sent: ${status}`);
     } catch (err) {
         console.error('Failed to send status update:', err);
     }
