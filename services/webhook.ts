@@ -84,9 +84,14 @@ export const sendFinalSummaryWebhook = async (results: TaskResult[]): Promise<vo
         generatedcontents: results
     };
 
+    // Populate link1, link2, etc., with the Cloudinary image URLs per user request
     results.forEach((result, index) => {
-        payload[`link${index + 1}`] = result.sourceUrl;
+        payload[`link${index + 1}`] = result.imageUrl;
     });
+
+    // Add a random image for link6 as requested.
+    // picsum.photos provides a random image that redirects, fulfilling the "random" requirement.
+    payload['link6'] = 'https://picsum.photos/1080';
 
     try {
         const response = await fetch(MAKE_FINAL_SUMMARY_WEBHOOK_URL, {
