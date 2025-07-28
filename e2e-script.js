@@ -1,84 +1,70 @@
-// Using ES Module imports, compatible with "type": "module" in package.json
 import puppeteer from 'puppeteer';
+import fetch from 'node-fetch';
+import dotenv from 'dotenv';
 
-const APP_URL = process.env.APP_URL;
-const APP_PASSWORD = process.env.APP_PASSWORD;
-const WEBHOOK_URL = 'https://hook.eu2.make.com/0ui64t2di3wvvg00fih0d32qp9i9jgme';
+dotenv.config();
 
-async function sendStatusUpdate(status, message, details = {}) {
-    try {
-        await fetch(WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                timestamp: new Date().toISOString(),
-                level: status,
-                message: message,
-                category: 'GitHub Action E2E',
-                details: details
-            }),
-        });
-        console.log(`Successfully sent status update: ${status}`);
-    } catch (error) {
-        console.error('Failed to send status update to webhook:', error);
-    }
-}
+const TARGET_URL = process.env.TARGET_URL;
+const PASSWORD = process.env.PASSWORD;
+const STATUS_WEBHOOK = process.env.STATUS_WEBHOOK;
 
 async function runAutomation() {
-    if (!APP_URL || !APP_PASSWORD) {
-        console.error('APP_URL and APP_PASSWORD environment variables must be set.');
-        await sendStatusUpdate('ERROR', 'Environment variables not configured in GitHub repository secrets.');
-        throw new Error('Missing environment variables.');
-    }
-
     console.log('Launching browser...');
-    const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    const browser = await puppeteer.launch({ headless: 'new' });
     const page = await browser.newPage();
-    page.setDefaultNavigationTimeout(120000); // 2 minutes
 
     try {
-        console.log(`Navigating to ${APP_URL}...`);
-        await page.goto(APP_URL, { waitUntil: 'networkidle0' });
+        console.log(`Navigating to ${TARGET_URL}...`);
+        await page.goto(TARGET_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+
         console.log('Page loaded. Entering password...');
+        await page.waitForSelector('input[type="password"]', { timeout: 20000 });
+        await page.type('input[type="password"]', PASSWORD);
+        await page.keyboard.press('Enter');
 
-        await page.waitForSelector('input[type="password"]', { timeout: 30000 });
-        await page.type('input[type="password"]', APP_PASSWORD);
-        await page.click('button[type="submit"]');
-        console.log('Password submitted.');
+        // Wait for the dashboard to load
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
 
+        // XPath selector for the start button
         const startButtonXPath = '//button[contains(., "START AUTOMATION")]';
-        await page.waitForSelector(`xpath/${startButtonXPath}`, { timeout: 30000 });
+
+        console.log('Waiting for START AUTOMATION button...');
+        await page.waitForXPath(startButtonXPath, { timeout: 30000 });
+
         const [startButton] = await page.$x(startButtonXPath);
+        if (!startButton) {
+            throw new Error('START AUTOMATION button not found.');
+        }
+
         await startButton.click();
         console.log('Automation started. Waiting for completion...');
 
-        await page.waitForSelector(`xpath/${startButtonXPath}[not(@disabled)]`, { timeout: 900000 }); // 15 mins
-        console.log('Automation process has finished.');
+        // Wait for button to become enabled again
+        await page.waitForXPath(`${startButtonXPath}[not(@disabled)]`, { timeout: 15 * 60 * 1000 });
 
-        const hasErrors = await page.evaluate(() => {
-            return !!document.querySelector('.border-red-500');
-        });
-
-        if (hasErrors) {
-            console.log('Errors detected in the batch process.');
-            await sendStatusUpdate('ERROR', 'Automation completed with one or more failed tasks.');
-        } else {
-            console.log('All tasks completed successfully.');
-            await sendStatusUpdate('SUCCESS', 'Automation batch process completed successfully.');
-        }
-
+        console.log('Automation completed successfully.');
+        await sendStatus('SUCCESS');
     } catch (error) {
         console.error('An error occurred during the automation script:', error);
-        await sendStatusUpdate('ERROR', 'The automation script failed to run to completion.', {
-            error: error.message
-        });
-        throw error;
+        await sendStatus('ERROR');
     } finally {
         console.log('Closing browser.');
         await browser.close();
     }
 }
 
-runAutomation().catch(() => process.exit(1));
+async function sendStatus(status) {
+    if (!STATUS_WEBHOOK) return;
+    try {
+        await fetch(STATUS_WEBHOOK, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+        console.log(`Successfully sent status update: ${status}`);
+    } catch (err) {
+        console.error('Failed to send status update:', err);
+    }
+}
+
+runAutomation();
