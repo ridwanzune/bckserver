@@ -3,8 +3,8 @@ name: Run Dhaka Dispatch Automation
 on:
   # Schedule to run every day at 6:00 PM UTC
   schedule:
-    - cron: '0 18 * * *'
-  # Allows you to run this workflow manually from the Actions tab
+    - cron: '0 15 * * *'
+  # Allows manual trigger from Actions tab
   workflow_dispatch:
 
 jobs:
@@ -19,9 +19,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        # Use npm ci for fast, reliable installs in CI
+        run: npm ci
 
       - name: Run Puppeteer Automation Script
         run: node e2e-script.js
