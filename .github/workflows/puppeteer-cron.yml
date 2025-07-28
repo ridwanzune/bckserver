@@ -1,0 +1,23 @@
+name: Run Puppeteer Daily
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Adjust UTC time
+  workflow_dispatch:
+
+jobs:
+  run-puppeteer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        run: npm install puppeteer
+
+      - name: Run Puppeteer Script
+        run: node puppeteer-script.js
