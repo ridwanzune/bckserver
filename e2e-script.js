@@ -45,21 +45,23 @@ async function sendStatus(status, message = '', details = {}) {
     console.log('Entering password…');
     await page.waitForSelector('input[type="password"]', { timeout: 30000 });
     await page.type('input[type="password"]', APP_PASSWORD);
-    await Promise.all([
-      page.click('button[type="submit"]'),
-      page.waitForNavigation({ waitUntil: 'networkidle0' })
-    ]);
+    await page.click('button[type="submit"]');
 
+    // **Instead of waiting for navigation**, wait for your START button:
     const btnXPath = "//button[contains(., 'START AUTOMATION')]";
-    console.log('Waiting for Start button…');
-    await page.waitForXPath(btnXPath, { timeout: 30000 });
-    const [btn] = await page.$x(btnXPath);
-    if (!btn) throw new Error('Start button not found');
-    await btn.click();
+    console.log('Waiting for START AUTOMATION button to appear…');
+    await page.waitForXPath(btnXPath, { timeout: 60000 });
 
-    console.log('Waiting for completion…');
+    // Now click the button
+    const [btn] = await page.$x(btnXPath);
+    if (!btn) throw new Error('START AUTOMATION button not found');
+    await btn.click();
+    console.log('Clicked START AUTOMATION — waiting for completion…');
+
+    // Wait for button to re-enable (indicates finish)
     await page.waitForXPath(`${btnXPath}[not(@disabled)]`, { timeout: 900000 });
 
+    // Check for any error indicators
     const hasErrors = await page.evaluate(() => !!document.querySelector('.border-red-500'));
     if (hasErrors) {
       console.log('Process finished with errors');
