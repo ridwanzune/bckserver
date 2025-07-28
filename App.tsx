@@ -5,9 +5,9 @@ import { findAndAnalyzeBestArticleFromList } from './services/gemini';
 import { fetchLatestBangladeshiNews } from './services/news';
 import { composeImage, loadImage } from './utils/canvas';
 import { LOGO_URL, BRAND_TEXT, OVERLAY_IMAGE_URL, NEWS_CATEGORIES, API_FETCH_DELAY_MS, APP_PASSWORD } from './constants';
-import { BatchTask, TaskStatus, WebhookPayload, NewsAnalysis, NewsDataArticle, StatusWebhookPayload, LogEntry } from './types';
+import { BatchTask, TaskStatus, WebhookPayload, NewsAnalysis, NewsDataArticle, StatusWebhookPayload, LogEntry, TaskResult } from './types';
 import { uploadToCloudinary } from './services/cloudinary';
-import { sendToMakeWebhook, sendStatusUpdate } from './services/webhook';
+import { sendToMakeWebhook, sendStatusUpdate, sendFinalSummaryWebhook } from './services/webhook';
 import { BatchStatusDisplay } from './components/BatchStatusDisplay';
 import { generateImageFromPrompt } from './services/imageGenerator';
 import { PasswordScreen } from './components/PasswordScreen';
@@ -128,6 +128,7 @@ const App: React.FC = () => {
     }
 
     // --- PHASE 2: PROCESS ALL GATHERED ARTICLES ---
+    const successfulResults: TaskResult[] = [];
     log({ level: 'INFO', message: `Gathering finished. Processing ${collectedData.length} articles.` });
     for (const data of collectedData) {
         const { taskId, analysis, article } = data;
@@ -173,16 +174,19 @@ const App: React.FC = () => {
             };
             await sendToMakeWebhook(webhookPayload);
             
+            const taskResult: TaskResult = {
+                headline: analysis.headline,
+                imageUrl: imageUrl,
+                caption: analysis.caption,
+                sourceUrl: article.link,
+                sourceName: analysis.sourceName,
+            };
+            
             updateTask(taskId, { 
                 status: TaskStatus.DONE,
-                result: {
-                    headline: analysis.headline,
-                    imageUrl: imageUrl,
-                    caption: analysis.caption,
-                    sourceUrl: article.link,
-                    sourceName: analysis.sourceName,
-                }
+                result: taskResult
             });
+            successfulResults.push(taskResult);
             setCompletedCount(prev => prev + 1);
             log({ level: 'SUCCESS', message: 'Task completed successfully!', category: categoryName, details: { headline: analysis.headline }});
 
@@ -192,6 +196,20 @@ const App: React.FC = () => {
             updateTask(taskId, { status: TaskStatus.ERROR, error: errorMessage });
             log({ level: 'ERROR', message: `Processing failed: ${errorMessage}`, category: categoryName });
         }
+    }
+    
+    // --- FINAL STEP: SEND SUMMARY WEBHOOK ---
+    if (successfulResults.length > 0) {
+        log({ level: 'INFO', message: `Sending final summary of ${successfulResults.length} generated items to webhook.` });
+        try {
+            await sendFinalSummaryWebhook(successfulResults);
+            log({ level: 'SUCCESS', message: 'Final summary webhook sent successfully.' });
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+            log({ level: 'ERROR', message: `Failed to send final summary webhook: ${errorMessage}` });
+        }
+    } else {
+        log({ level: 'INFO', message: 'No items were successfully generated, skipping final summary webhook.' });
     }
 
     setIsProcessing(false);

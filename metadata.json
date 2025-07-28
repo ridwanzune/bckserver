@@ -1,6 +1,5 @@
 {
-  "name": "Dhaka Dispatch News Generator",
+  "name": "5 normak content auto",
   "description": "An empty app",
-  "requestFramePermissions": [],
-  "prompt": ""
+  "requestFramePermissions": []
 }

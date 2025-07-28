@@ -1,6 +1,6 @@
 
-import { MAKE_WEBHOOK_URL, MAKE_WEBHOOK_AUTH_TOKEN, MAKE_STATUS_WEBHOOK_URL } from '../constants';
-import type { WebhookPayload, StatusWebhookPayload } from '../types';
+import { MAKE_WEBHOOK_URL, MAKE_WEBHOOK_AUTH_TOKEN, MAKE_STATUS_WEBHOOK_URL, MAKE_FINAL_SUMMARY_WEBHOOK_URL } from '../constants';
+import type { WebhookPayload, StatusWebhookPayload, TaskResult } from '../types';
 
 /**
  * Sends a structured payload to the Make.com webhook.
@@ -68,4 +68,42 @@ export const sendStatusUpdate = (data: Omit<StatusWebhookPayload, 'timestamp'>):
         // a failure in status reporting to crash the main application.
         console.error('Failed to send status update:', error);
     });
+};
+
+/**
+ * Sends a final summary of all generated content to a webhook.
+ * @param results An array of successful task results.
+ */
+export const sendFinalSummaryWebhook = async (results: TaskResult[]): Promise<void> => {
+    if (!MAKE_FINAL_SUMMARY_WEBHOOK_URL) {
+        console.warn('Final summary webhook URL is not set in constants.ts');
+        return;
+    }
+    
+    const payload: { generatedcontents: TaskResult[]; [key: string]: any } = {
+        generatedcontents: results
+    };
+
+    results.forEach((result, index) => {
+        payload[`link${index + 1}`] = result.sourceUrl;
+    });
+
+    try {
+        const response = await fetch(MAKE_FINAL_SUMMARY_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const responseText = await response.text();
+            throw new Error(`Final summary webhook request failed with status ${response.status}: ${responseText}`);
+        }
+
+        console.log('Successfully sent final summary to webhook.');
+
+    } catch (error) {
+        console.error('Error sending final summary webhook:', error);
+        throw error; // Re-throw to be caught by the main task handler in App.tsx
+    }
 };
