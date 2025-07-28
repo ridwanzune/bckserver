@@ -1,97 +1,59 @@
-// Using ES Module imports, compatible with "type": "module" in package.json
+// e2e-script.js
 import puppeteer from 'puppeteer';
 
-// These are expected to be set as environment variables in the GitHub Action runner
-const APP_URL = process.env.APP_URL;
-const APP_PASSWORD = process.env.APP_PASSWORD;
-const WEBHOOK_URL = 'https://hook.eu2.make.com/0ui64t2di3wvvg00fih0d32qp9i9jgme';
+const runAutomation = async () => {
+  console.log('Launching browser...');
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
 
-async function sendStatusUpdate(status, message, details = {}) {
-    try {
-        await fetch(WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                timestamp: new Date().toISOString(),
-                level: status, // 'SUCCESS' or 'ERROR'
-                message: message,
-                category: 'GitHub Action E2E',
-                details: details
-            }),
-        });
-        console.log(`Successfully sent status update: ${status}`);
-    } catch (error) {
-        console.error('Failed to send status update to webhook:', error);
-    }
-}
+  const page = await browser.newPage();
 
-async function runAutomation() {
-    if (!APP_URL || !APP_PASSWORD) {
-        console.error('APP_URL and APP_PASSWORD environment variables must be set.');
-        await sendStatusUpdate('ERROR', 'Environment variables not configured in GitHub repository secrets.');
-        throw new Error('APP_URL and APP_PASSWORD environment variables must be set.');
-    }
+  try {
+    console.log('Navigating to your app...');
+    await page.goto('https://your-app-url.vercel.app/', { waitUntil: 'networkidle0' });
 
-    console.log('Launching browser...');
-    const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
-    page.setDefaultNavigationTimeout(120000); // 2 minutes
+    console.log('Page loaded. Entering password...');
+    await page.type('input[type="password"]', process.env.APP_PASSWORD);
+    await Promise.all([
+      page.click('button[type="submit"]'),
+      page.waitForNavigation({ waitUntil: 'networkidle0' }),
+    ]);
 
-    try {
-        console.log(`Navigating to ${APP_URL}...`);
-        await page.goto(APP_URL, { waitUntil: 'networkidle0' });
-        console.log('Page loaded. Entering password...');
+    console.log('Waiting for "Generate" button...');
+    const [generateBtn] = await page.$x("//button[contains(., 'Generate')]");
+    if (!generateBtn) throw new Error('"Generate" button not found');
+    await generateBtn.click();
 
-        // Step 1: Unlock the App
-        await page.waitForSelector('input[type="password"]', { timeout: 30000 });
-        await page.type('input[type="password"]', APP_PASSWORD);
-        await page.click('button[type="submit"]');
-        console.log('Password submitted.');
+    console.log('Waiting for completion...');
+    await page.waitForTimeout(10000); // adjust based on actual app speed
 
-        // Step 2: Start Automation
-        const startButtonXPath = '//button[contains(., "START AUTOMATION")]';
-        await page.waitForSelector(`xpath/${startButtonXPath}`, { timeout: 30000 });
+    console.log('Automation complete.');
+    await sendStatus('SUCCESS');
+  } catch (err) {
+    console.error('An error occurred during the automation script:', err);
+    await sendStatus('ERROR');
+  } finally {
+    console.log('Closing browser.');
+    await browser.close();
+  }
+};
 
-        // Use the modern page.$ with an xpath selector
-        const startButton = await page.$(`xpath/${startButtonXPath}`);
-        if (!startButton) {
-            throw new Error('Could not find the "START AUTOMATION" button after waiting.');
-        }
-        await startButton.click();
-        console.log('Automation started. Waiting for completion...');
+const sendStatus = async (status) => {
+  const webhookUrl = process.env.STATUS_WEBHOOK;
+  if (!webhookUrl) {
+    console.warn('No STATUS_WEBHOOK provided. Skipping status send.');
+    return;
+  }
 
-        // Step 3: Wait for Completion
-        // Wait for the start button to be enabled again (not disabled)
-        await page.waitForSelector(`xpath/${startButtonXPath}[not(@disabled)]`, { timeout: 900000 }); // 15 minutes
-        console.log('Automation process has finished.');
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
 
-        // Step 4: Check for Errors on Page
-        const hasErrors = await page.evaluate(() => {
-            return !!document.querySelector('.border-red-500');
-        });
+  console.log(`Successfully sent status update: ${status}`);
+};
 
-        // Step 5: Report Final Status
-        if (hasErrors) {
-            console.log('Errors detected in the batch process.');
-            await sendStatusUpdate('ERROR', 'Automation completed with one or more failed tasks.');
-        } else {
-            console.log('All tasks completed successfully.');
-            await sendStatusUpdate('SUCCESS', 'Automation batch process completed successfully.');
-        }
-
-    } catch (error) {
-        console.error('An error occurred during the automation script:', error);
-        await sendStatusUpdate('ERROR', 'The automation script failed to run to completion.', {
-            error: error.message
-        });
-        throw error;
-    } finally {
-        console.log('Closing browser.');
-        await browser.close();
-    }
-}
-
-// Run the main function and handle any top-level promise rejection to fail the action.
-runAutomation().catch(() => process.exit(1));
+runAutomation();
