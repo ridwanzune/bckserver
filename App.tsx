@@ -1,6 +1,5 @@
 
-import React, 'react';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { findAndAnalyzeBestArticleFromList } from './services/gemini';
 import { fetchLatestBangladeshiNews } from './services/news';
