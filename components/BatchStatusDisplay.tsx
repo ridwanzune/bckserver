@@ -38,7 +38,11 @@ export const BatchStatusDisplay: React.FC<BatchStatusDisplayProps> = ({ tasks })
         <h3 className="text-3xl font-black text-center text-black mb-6">Batch Progress</h3>
         <div className="space-y-4">
             {tasks.map((task) => (
-                <div key={task.id} className={`p-4 rounded-lg border-4 flex flex-col sm:flex-row sm:items-center sm:justify-between transition-all duration-300 ${getStatusColorClass(task.status)}`}>
+                <div 
+                    key={task.id} 
+                    data-task-id={task.id}
+                    data-status={task.status}
+                    className={`p-4 rounded-lg border-4 flex flex-col sm:flex-row sm:items-center sm:justify-between transition-all duration-300 ${getStatusColorClass(task.status)}`}>
                     <div className="flex items-center gap-4 flex-1 mb-3 sm:mb-0">
                         <div className="text-2xl">{getStatusIcon(task.status)}</div>
                         <div className="flex-1">

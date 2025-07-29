@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LOGO_URL } from '../constants';
+import { LOGO_URL } from './utils/constants';
 
 export const Header: React.FC = () => {
   return (

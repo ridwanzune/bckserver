@@ -1,5 +1,6 @@
 
-import { MAKE_WEBHOOK_URL, MAKE_WEBHOOK_AUTH_TOKEN, MAKE_STATUS_WEBHOOK_URL, MAKE_FINAL_SUMMARY_WEBHOOK_URL } from '../constants';
+
+import { MAKE_WEBHOOK_URL, MAKE_WEBHOOK_AUTH_TOKEN, MAKE_STATUS_WEBHOOK_URL, MAKE_FINAL_BUNDLE_WEBHOOK_URL } from '../components/utils/constants';
 import type { WebhookPayload, StatusWebhookPayload, TaskResult } from '../types';
 
 /**
@@ -70,31 +71,40 @@ export const sendStatusUpdate = (data: Omit<StatusWebhookPayload, 'timestamp'>):
     });
 };
 
+interface FinalContentPayload {
+    imageUrl: string;
+    caption: string;
+    sourceLink: string;
+}
+
 /**
- * Sends a final summary of all generated content to a webhook.
- * @param results An array of successful task results.
+ * Sends a bundled payload of all successfully generated content to a final webhook.
+ * @param results An array of TaskResult objects for all completed tasks.
  */
-export const sendFinalSummaryWebhook = async (results: TaskResult[]): Promise<void> => {
-    if (!MAKE_FINAL_SUMMARY_WEBHOOK_URL) {
-        console.warn('Final summary webhook URL is not set in constants.ts');
+export const sendFinalBundle = async (results: TaskResult[]): Promise<void> => {
+    // Prevent sending if the URL is not set or if there are no results
+    if (!MAKE_FINAL_BUNDLE_WEBHOOK_URL || results.length === 0) {
+        if (results.length === 0) console.log("No successful results to send to final bundle webhook.");
         return;
     }
-    
-    const payload: { generatedcontents: TaskResult[]; [key: string]: any } = {
-        generatedcontents: results
-    };
 
-    // Populate link1, link2, etc., with the Cloudinary image URLs per user request
+    const linksPayload: Record<string, string> = {};
     results.forEach((result, index) => {
-        payload[`link${index + 1}`] = result.imageUrl;
+        // Per user request, send the final Cloudinary image URL as link1, link2, etc.
+        linksPayload[`link${index + 1}`] = result.imageUrl;
     });
 
-    // Add a random image for link6 as requested.
-    // picsum.photos provides a random image that redirects, fulfilling the "random" requirement.
-    payload['link6'] = 'https://picsum.photos/1080';
+    const payload = {
+        ...linksPayload,
+        generatedContents: results.map(result => ({
+            imageUrl: result.imageUrl,
+            caption: result.caption,
+            sourceLink: result.sourceUrl,
+        })),
+    };
 
     try {
-        const response = await fetch(MAKE_FINAL_SUMMARY_WEBHOOK_URL, {
+        const response = await fetch(MAKE_FINAL_BUNDLE_WEBHOOK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -102,13 +112,13 @@ export const sendFinalSummaryWebhook = async (results: TaskResult[]): Promise<vo
 
         if (!response.ok) {
             const responseText = await response.text();
-            throw new Error(`Final summary webhook request failed with status ${response.status}: ${responseText}`);
+            throw new Error(`Final bundle webhook request failed with status ${response.status}: ${responseText}`);
         }
 
-        console.log('Successfully sent final summary to webhook.');
-
+        console.log(`Successfully sent final bundle of ${results.length} items to webhook.`);
     } catch (error) {
-        console.error('Error sending final summary webhook:', error);
-        throw error; // Re-throw to be caught by the main task handler in App.tsx
+        console.error('Error sending final content bundle to webhook:', error);
+        // Re-throw so the calling function knows about the failure and can log it.
+        throw error;
     }
 };
