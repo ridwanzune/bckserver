@@ -1,4 +1,3 @@
-
 // Set a password to protect the app. 
 // For cron jobs, you can pass it as a query parameter: ?action=start&password=YOUR_PASSWORD
 export const APP_PASSWORD = 'Dhakadispatch11@';
@@ -19,9 +18,6 @@ export const MAKE_WEBHOOK_AUTH_TOKEN = 'xR@7!pZ2#qLd$Vm8^tYe&WgC*oUeXsKv';
 // This is critical for monitoring and debugging the cron job.
 // Paste the new webhook URL here.
 export const MAKE_STATUS_WEBHOOK_URL = 'https://hook.eu2.make.com/0ui64t2di3wvvg00fih0d32qp9i9jgme';
-
-// NEW: Webhook for final summary of all generated content
-export const MAKE_FINAL_SUMMARY_WEBHOOK_URL = 'https://hook.eu2.make.com/iynaiqae3cig9urc9klykd3oj2tb9prq';
 
 
 // --- NEW: NEWS CATEGORIES FOR BATCH PROCESSING ---

@@ -1,14 +1,10 @@
+
 export interface NewsAnalysis {
   headline: string;
   highlightPhrases: string[];
   caption: string;
   sourceName: string;
   imagePrompt: string;
-}
-
-export interface SelectedArticleAnalysis extends NewsAnalysis {
-  originalArticleId: number; // The ID we assigned to the article in the prompt.
-  category: 'bangladesh_top_stories' | 'international_top_stories' | 'bangladesh_business_tech' | 'bangladesh_culture_people' | 'bangladesh_politics';
 }
 
 export interface NewsDataArticle {
@@ -63,11 +59,11 @@ export interface TaskResult {
     imageUrl: string; // Cloudinary URL
     caption: string;
     sourceUrl: string;
-    sourceName:string;
+    sourceName: string;
 }
 
 export interface BatchTask {
-  id: string;
+  id: string; 
   categoryName: string;
   status: TaskStatus;
   result?: TaskResult;

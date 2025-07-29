@@ -1,20 +1,26 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
-import { selectAndAnalyzeSixBestArticles, translateArticlesToEnglish } from './services/gemini';
-import { fetchAllNewsFromSources } from './services/news';
-import { composeImage, loadImage } from './components/utils/canvas';
-import { LOGO_URL, BRAND_TEXT, OVERLAY_IMAGE_URL, NEWS_CATEGORIES, APP_PASSWORD } from './components/utils/constants';
-import { BatchTask, TaskStatus, WebhookPayload, LogEntry, TaskResult, SelectedArticleAnalysis } from './types';
-import { uploadToCloudinary } from './cloudinary';
-import { sendToMakeWebhook, sendStatusUpdate, sendFinalBundle } from './services/webhook';
+import { findAndAnalyzeBestArticleFromList } from './services/gemini';
+import { fetchLatestBangladeshiNews } from './services/news';
+import { composeImage, loadImage } from './utils/canvas';
+import { LOGO_URL, BRAND_TEXT, OVERLAY_IMAGE_URL, NEWS_CATEGORIES, API_FETCH_DELAY_MS, APP_PASSWORD } from './constants';
+import { BatchTask, TaskStatus, WebhookPayload, NewsAnalysis, NewsDataArticle, StatusWebhookPayload, LogEntry } from './types';
+import { uploadToCloudinary } from './services/cloudinary';
+import { sendToMakeWebhook, sendStatusUpdate } from './services/webhook';
 import { BatchStatusDisplay } from './components/BatchStatusDisplay';
 import { generateImageFromPrompt } from './services/imageGenerator';
-import { LogPanel } from './components/utils/LogPanel';
 import { PasswordScreen } from './components/PasswordScreen';
+import { LogPanel } from './components/LogPanel';
+
+interface CollectedData {
+    taskId: string;
+    analysis: NewsAnalysis;
+    article: NewsDataArticle;
+}
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(!APP_PASSWORD);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [tasks, setTasks] = useState<BatchTask[]>([]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [completedCount, setCompletedCount] = useState(0);
@@ -26,17 +32,6 @@ const App: React.FC = () => {
     isProcessingRef.current = isProcessing;
   }, [isProcessing]);
 
-  useEffect(() => {
-    // This effect runs once on mount to check for URL-based authentication.
-    if (!isAuthenticated && typeof window !== 'undefined' && APP_PASSWORD) {
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('password') === APP_PASSWORD) {
-            console.log('Authenticated via URL parameter.');
-            setIsAuthenticated(true);
-        }
-    }
-  }, [isAuthenticated]);
-
   const log = useCallback((data: Omit<LogEntry, 'timestamp'>) => {
     const newLogEntry: LogEntry = {
         ...data,
@@ -45,181 +40,199 @@ const App: React.FC = () => {
     setLogs(prevLogs => [...prevLogs, newLogEntry]);
     sendStatusUpdate(data);
   }, []);
-  
-  const updateTask = useCallback((taskId: string, updates: Partial<BatchTask>) => {
-      setTasks(prevTasks => prevTasks.map(task => 
-          task.id === taskId ? { ...task, ...updates } : task
-      ));
-  }, []);
-
-  const updateTaskStatusForAll = useCallback((status: TaskStatus) => {
-    setTasks(prevTasks => prevTasks.map(task => ({ ...task, status })));
-  }, []);
 
   const handleStartAutomation = useCallback(async () => {
-    log({ level: 'INFO', message: 'Automation process started.' });
+    log({ level: 'INFO', message: 'Automation process started by trigger.' });
     setIsProcessing(true);
     setCompletedCount(0);
-    const allResults: TaskResult[] = [];
     
     const initialTasks: BatchTask[] = NEWS_CATEGORIES.map(cat => ({
-        id: cat.id,
+        id: cat.apiValue,
         categoryName: cat.name,
         status: TaskStatus.PENDING,
     }));
     setTasks(initialTasks);
 
-    try {
-        // --- PHASE 1: GATHER ALL NEWS ---
-        log({ level: 'INFO', message: 'Gathering a large pool of articles from all sources...' });
-        updateTaskStatusForAll(TaskStatus.GATHERING);
-        
-        const allArticles = await fetchAllNewsFromSources();
-        log({ level: 'SUCCESS', message: `Successfully gathered ${allArticles.length} unique articles.` });
+    const usedArticleLinks = new Set<string>();
 
-        // --- NEW PHASE 1.5: TRANSLATE ARTICLES ---
-        log({ level: 'INFO', message: 'Translating articles to English for consistent analysis...' });
-        const translatedArticles = await translateArticlesToEnglish(allArticles);
-        log({ level: 'SUCCESS', message: `Translation complete. Pool of ${translatedArticles.length} articles is ready.` });
+    const updateTask = (taskId: string, updates: Partial<BatchTask>) => {
+        setTasks(prevTasks => prevTasks.map(task => 
+            task.id === taskId ? { ...task, ...updates } : task
+        ));
+    };
+    
+    // --- PHASE 1: GATHER ALL NEWS ARTICLES ---
+    const collectedData: CollectedData[] = [];
+    log({ level: 'INFO', message: 'Starting Phase 1: Article Gathering.' });
 
+    for (const category of NEWS_CATEGORIES) {
+        const taskId = category.apiValue;
+        try {
+            updateTask(taskId, { status: TaskStatus.GATHERING });
+            log({ level: 'INFO', message: `Gathering for: ${category.name}`, category: category.name });
 
-        // --- PHASE 2: SINGLE AI ANALYSIS ---
-        log({ level: 'INFO', message: `Sending article pool of ${translatedArticles.length} articles to AI for selection and analysis...` });
-        updateTaskStatusForAll(TaskStatus.PROCESSING);
+            let allArticles: NewsDataArticle[];
 
-        const analyzedResults: SelectedArticleAnalysis[] = await selectAndAnalyzeSixBestArticles(translatedArticles);
-        log({ level: 'SUCCESS', message: `AI has selected and analyzed ${analyzedResults.length} articles.` });
-        
-        // --- PHASE 3: PROCESS RESULTS ---
-        // Map AI results to the original task IDs. This ensures we fill the correct UI slots.
-        const taskSlotMap = new Map<string, BatchTask[]>();
-        NEWS_CATEGORIES.forEach(cat => {
-            const slots = taskSlotMap.get(cat.type) || [];
-            slots.push(initialTasks.find(t => t.id === cat.id)!);
-            taskSlotMap.set(cat.type, slots);
-        });
+            if (category.apiValue === 'top') {
+                log({ level: 'INFO', message: 'Creating synthetic "Trending" category.', category: category.name });
+                const otherCategoryValues = NEWS_CATEGORIES
+                    .filter(c => c.apiValue !== 'top')
+                    .map(c => c.apiValue);
 
-        const processedTaskIds = new Set<string>();
+                const articlesFromAllCategories = (await Promise.all(
+                    otherCategoryValues.map(cat => fetchLatestBangladeshiNews(cat))
+                )).flat();
 
-        for (const analyzed of analyzedResults) {
-            const originalArticle = translatedArticles[analyzed.originalArticleId];
-            if (!originalArticle) {
-                log({ level: 'ERROR', message: `AI returned an invalid article ID: ${analyzed.originalArticleId}` });
-                continue;
-            }
-
-            const availableSlots = taskSlotMap.get(analyzed.category)?.filter(t => !processedTaskIds.has(t.id));
-            if (!availableSlots || availableSlots.length === 0) {
-                 log({ level: 'ERROR', message: `AI returned an article for category '${analyzed.category}', but all slots are already filled.` });
-                continue;
-            }
-            const taskToUpdate = availableSlots[0];
-            processedTaskIds.add(taskToUpdate.id);
-
-            const { id: taskId, categoryName } = taskToUpdate;
-            const analysis = analyzed;
-            
-            try {
-                let imageToCompose: HTMLImageElement;
-                try {
-                    if (!originalArticle.image_url) throw new Error("Article has no image_url.");
-                    updateTask(taskId, { status: TaskStatus.PROCESSING });
-                    imageToCompose = await loadImage(originalArticle.image_url);
-                    log({ level: 'INFO', message: 'Article image loaded.', category: categoryName });
-                } catch (error) {
-                    log({ level: 'INFO', message: `Article image failed. Generating new one.`, category: categoryName, details: { error: error instanceof Error ? error.message : String(error) }});
-                    updateTask(taskId, { status: TaskStatus.GENERATING_IMAGE });
-                    const generatedImageBase64 = await generateImageFromPrompt(analysis.imagePrompt);
-                    imageToCompose = await loadImage(generatedImageBase64);
-                }
-
-                updateTask(taskId, { status: TaskStatus.COMPOSING });
-                log({ level: 'INFO', message: 'Composing final image.', category: categoryName });
-                const compiledImage = await composeImage(
-                  imageToCompose,
-                  analysis.headline,
-                  analysis.highlightPhrases,
-                  LOGO_URL,
-                  BRAND_TEXT,
-                  OVERLAY_IMAGE_URL
-                );
-
-                updateTask(taskId, { status: TaskStatus.UPLOADING });
-                log({ level: 'INFO', message: 'Uploading to Cloudinary.', category: categoryName });
-                const imageUrl = await uploadToCloudinary(compiledImage);
-
-                updateTask(taskId, { status: TaskStatus.SENDING_WEBHOOK });
-                log({ level: 'INFO', message: 'Sending to workflow.', category: categoryName });
-                const webhookPayload: WebhookPayload = {
-                    headline: analysis.headline, imageUrl, summary: analysis.caption,
-                    newsLink: originalArticle.link, status: 'Queue'
-                };
-                await sendToMakeWebhook(webhookPayload);
+                const uniqueArticles = Array.from(new Map(articlesFromAllCategories.map(article => [article.link, article])).values());
                 
-                const finalResult: TaskResult = {
-                    headline: analysis.headline, imageUrl, caption: analysis.caption,
-                    sourceUrl: originalArticle.link, sourceName: analysis.sourceName,
-                };
+                uniqueArticles.sort((a, b) => {
+                    if (!a.pubDate || !b.pubDate) return 0;
+                    return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
+                });
+                
+                allArticles = uniqueArticles.slice(0, 10);
+                
+                if (allArticles.length === 0) throw new Error('Could not construct "Trending" category.');
+                log({ level: 'INFO', message: `Found ${allArticles.length} articles for "Trending".`, category: category.name});
 
-                updateTask(taskId, { status: TaskStatus.DONE, result: finalResult });
-                allResults.push(finalResult);
-                setCompletedCount(prev => prev + 1);
-                log({ level: 'SUCCESS', message: 'Task completed successfully!', category: categoryName, details: { headline: analysis.headline }});
+            } else {
+                 allArticles = await fetchLatestBangladeshiNews(category.apiValue);
+            }
+            
+            const unusedArticles = allArticles.filter(article => !usedArticleLinks.has(article.link));
 
-            } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-                console.error(`Failed processing task for category ${categoryName}:`, err);
-                updateTask(taskId, { status: TaskStatus.ERROR, error: errorMessage });
-                log({ level: 'ERROR', message: `Processing failed: ${errorMessage}`, category: categoryName });
-            }
-        }
-        
-        // Mark any tasks that didn't get assigned a result as errors
-        initialTasks.forEach(task => {
-            if (!processedTaskIds.has(task.id)) {
-                updateTask(task.id, { status: TaskStatus.ERROR, error: "AI did not select an article for this slot." });
-            }
-        });
+            if (unusedArticles.length === 0) throw new Error(`No new, unused articles found.`);
+            
+            log({ level: 'INFO', message: `Found ${unusedArticles.length} new articles. Analyzing...`, category: category.name });
+            const result = await findAndAnalyzeBestArticleFromList(unusedArticles);
+            
+            if (!result) throw new Error(`AI deemed all articles irrelevant.`);
+            
+            const { analysis, article: relevantArticle } = result;
+            usedArticleLinks.add(relevantArticle.link);
+            collectedData.push({ taskId, analysis, article: relevantArticle });
+            
+            updateTask(taskId, { status: TaskStatus.GATHERED });
+            log({ level: 'SUCCESS', message: `Article gathered and analyzed.`, category: category.name, details: { headline: analysis.headline, source: relevantArticle.link }});
 
-    } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : "A critical error occurred in the main process.";
-        log({ level: 'ERROR', message: `Automation failed critically: ${errorMessage}` });
-        setTasks(prevTasks => prevTasks.map(t => t.status !== TaskStatus.DONE ? { ...t, status: TaskStatus.ERROR, error: "Process failed" } : t));
-    } finally {
-        setIsProcessing(false);
-        log({ level: 'SUCCESS', message: 'Automation process finished.' });
-        if (allResults.length > 0) {
-            try {
-                log({ level: 'INFO', message: `Sending final bundle of ${allResults.length} content pieces to webhook.` });
-                await sendFinalBundle(allResults);
-                log({ level: 'SUCCESS', message: 'Final bundle sent successfully.' });
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-                log({ level: 'ERROR', message: `Failed to send final content bundle: ${errorMessage}` });
+            if (API_FETCH_DELAY_MS > 0) {
+                await new Promise(resolve => setTimeout(resolve, API_FETCH_DELAY_MS));
             }
-        } else {
-            log({ level: 'INFO', message: 'No successful content was generated to be sent in the final bundle.' });
+
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+            console.error(`Failed to gather article for category ${category.name}:`, err);
+            updateTask(taskId, { status: TaskStatus.ERROR, error: errorMessage });
+            log({ level: 'ERROR', message: `Gathering failed: ${errorMessage}`, category: category.name });
         }
     }
-  }, [log, updateTask, updateTaskStatusForAll]);
+
+    // --- PHASE 2: PROCESS ALL GATHERED ARTICLES ---
+    log({ level: 'INFO', message: `Gathering finished. Processing ${collectedData.length} articles.` });
+    for (const data of collectedData) {
+        const { taskId, analysis, article } = data;
+        const categoryName = NEWS_CATEGORIES.find(c => c.apiValue === taskId)?.name || taskId;
+
+        try {
+            updateTask(taskId, { status: TaskStatus.PROCESSING });
+            
+            let imageToCompose: HTMLImageElement;
+            try {
+                imageToCompose = await loadImage(article.image_url!);
+                log({ level: 'INFO', message: 'Article image loaded.', category: categoryName });
+            } catch (error) {
+                log({ level: 'INFO', message: `Article image failed. Generating new one.`, category: categoryName, details: { error: error instanceof Error ? error.message : String(error) }});
+                updateTask(taskId, { status: TaskStatus.GENERATING_IMAGE });
+                const generatedImageBase64 = await generateImageFromPrompt(analysis.imagePrompt);
+                imageToCompose = await loadImage(generatedImageBase64);
+            }
+
+            updateTask(taskId, { status: TaskStatus.COMPOSING });
+            log({ level: 'INFO', message: 'Composing final image.', category: categoryName });
+            const compiledImage = await composeImage(
+              imageToCompose,
+              analysis.headline,
+              analysis.highlightPhrases,
+              LOGO_URL,
+              BRAND_TEXT,
+              OVERLAY_IMAGE_URL
+            );
+
+            updateTask(taskId, { status: TaskStatus.UPLOADING });
+            log({ level: 'INFO', message: 'Uploading to Cloudinary.', category: categoryName });
+            const imageUrl = await uploadToCloudinary(compiledImage);
+
+            updateTask(taskId, { status: TaskStatus.SENDING_WEBHOOK });
+            log({ level: 'INFO', message: 'Sending to workflow.', category: categoryName });
+            const webhookPayload: WebhookPayload = {
+                headline: analysis.headline,
+                imageUrl: imageUrl,
+                summary: analysis.caption,
+                newsLink: article.link,
+                status: 'Queue'
+            };
+            await sendToMakeWebhook(webhookPayload);
+            
+            updateTask(taskId, { 
+                status: TaskStatus.DONE,
+                result: {
+                    headline: analysis.headline,
+                    imageUrl: imageUrl,
+                    caption: analysis.caption,
+                    sourceUrl: article.link,
+                    sourceName: analysis.sourceName,
+                }
+            });
+            setCompletedCount(prev => prev + 1);
+            log({ level: 'SUCCESS', message: 'Task completed successfully!', category: categoryName, details: { headline: analysis.headline }});
+
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+            console.error(`Failed task for category ${categoryName}:`, err);
+            updateTask(taskId, { status: TaskStatus.ERROR, error: errorMessage });
+            log({ level: 'ERROR', message: `Processing failed: ${errorMessage}`, category: categoryName });
+        }
+    }
+
+    setIsProcessing(false);
+    log({ level: 'SUCCESS', message: 'Automation process finished.' });
+  }, [log]);
 
   useEffect(() => {
-    // This effect handles URL-triggered automation, but only if authenticated.
-    if (isAuthenticated && typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get('action') === 'start' && !hasTriggeredFromUrl && !isProcessingRef.current) {
-        console.log('Start action triggered from URL.');
-        setHasTriggeredFromUrl(true);
-        setTimeout(handleStartAutomation, 0); 
+        
+        const handleAuthAndStart = () => {
+            console.log('Start action triggered from URL.');
+            setHasTriggeredFromUrl(true);
+            setIsAuthenticated(true);
+            // Use timeout to allow state to update before starting automation
+            setTimeout(handleStartAutomation, 0); 
+        };
+        
+        // If password is in constants, check it. Otherwise, just authenticate.
+        if (APP_PASSWORD) {
+            const providedPassword = urlParams.get('password');
+            if (providedPassword === APP_PASSWORD) {
+                handleAuthAndStart();
+            } else {
+                console.log('URL trigger failed: incorrect or missing password.');
+                // Optionally show an error or just remain on the password screen
+            }
+        } else {
+            handleAuthAndStart();
+        }
       }
     }
-  }, [isAuthenticated, handleStartAutomation, hasTriggeredFromUrl]);
+  }, [handleStartAutomation, hasTriggeredFromUrl]);
 
-  const overallProgress = tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0;
 
   if (!isAuthenticated) {
-    return <PasswordScreen onSuccess={() => setIsAuthenticated(true)} />;
+    return <PasswordScreen onSuccess={() => setIsAuthenticated(true)} onLog={log} />;
   }
+
+  const overallProgress = tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0;
 
   return (
     <div className="min-h-screen bg-gray-200 text-black p-4 md:p-8 font-sans">
@@ -232,7 +245,7 @@ const App: React.FC = () => {
           <div className="p-8 bg-yellow-300 border-4 border-black rounded-xl neo-shadow">
             <h2 className="text-3xl font-black text-center">Generate Post Batch</h2>
             <p className="mt-2 text-gray-800 max-w-2xl mx-auto text-center font-medium">
-              Click the button to fetch, analyze, and process news content for all categories. This will generate 6 unique pieces of content.
+              Click the button to fetch, analyze, and process news content for all categories.
             </p>
             <div className="mt-8 text-center">
               <button

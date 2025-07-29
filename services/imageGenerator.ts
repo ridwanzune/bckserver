@@ -1,18 +1,8 @@
-
-
 import { GoogleGenAI } from "@google/genai";
+import { GEMINI_API_KEY } from '../apiKey';
 
-// The API key is sourced exclusively from the `API_KEY` environment variable.
-// This is required for the AI Studio environment and deployment.
-const IMAGEN_API_KEY = process.env.API_KEY;
-
-if (!IMAGEN_API_KEY) {
-    const errorMessage = "CRITICAL: Image Generation API key is missing. Ensure the `API_KEY` environment variable is set.";
-    console.error(errorMessage);
-    throw new Error(errorMessage);
-}
-
-const ai = new GoogleGenAI({ apiKey: IMAGEN_API_KEY });
+// Initialize the AI client with the hardcoded key
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 
 /*

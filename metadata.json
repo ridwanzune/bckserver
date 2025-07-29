@@ -1,5 +1,6 @@
 {
-  "name": "6 exciting cotent auto",
+  "name": "Dhaka Dispatch News Generator",
   "description": "An empty app",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "prompt": ""
 }

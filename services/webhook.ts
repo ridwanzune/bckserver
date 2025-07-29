@@ -1,7 +1,6 @@
 
-
-import { MAKE_WEBHOOK_URL, MAKE_WEBHOOK_AUTH_TOKEN, MAKE_STATUS_WEBHOOK_URL, MAKE_FINAL_BUNDLE_WEBHOOK_URL } from '../components/utils/constants';
-import type { WebhookPayload, StatusWebhookPayload, TaskResult } from '../types';
+import { MAKE_WEBHOOK_URL, MAKE_WEBHOOK_AUTH_TOKEN, MAKE_STATUS_WEBHOOK_URL } from '../constants';
+import type { WebhookPayload, StatusWebhookPayload } from '../types';
 
 /**
  * Sends a structured payload to the Make.com webhook.
@@ -69,56 +68,4 @@ export const sendStatusUpdate = (data: Omit<StatusWebhookPayload, 'timestamp'>):
         // a failure in status reporting to crash the main application.
         console.error('Failed to send status update:', error);
     });
-};
-
-interface FinalContentPayload {
-    imageUrl: string;
-    caption: string;
-    sourceLink: string;
-}
-
-/**
- * Sends a bundled payload of all successfully generated content to a final webhook.
- * @param results An array of TaskResult objects for all completed tasks.
- */
-export const sendFinalBundle = async (results: TaskResult[]): Promise<void> => {
-    // Prevent sending if the URL is not set or if there are no results
-    if (!MAKE_FINAL_BUNDLE_WEBHOOK_URL || results.length === 0) {
-        if (results.length === 0) console.log("No successful results to send to final bundle webhook.");
-        return;
-    }
-
-    const linksPayload: Record<string, string> = {};
-    results.forEach((result, index) => {
-        // Per user request, send the final Cloudinary image URL as link1, link2, etc.
-        linksPayload[`link${index + 1}`] = result.imageUrl;
-    });
-
-    const payload = {
-        ...linksPayload,
-        generatedContents: results.map(result => ({
-            imageUrl: result.imageUrl,
-            caption: result.caption,
-            sourceLink: result.sourceUrl,
-        })),
-    };
-
-    try {
-        const response = await fetch(MAKE_FINAL_BUNDLE_WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            const responseText = await response.text();
-            throw new Error(`Final bundle webhook request failed with status ${response.status}: ${responseText}`);
-        }
-
-        console.log(`Successfully sent final bundle of ${results.length} items to webhook.`);
-    } catch (error) {
-        console.error('Error sending final content bundle to webhook:', error);
-        // Re-throw so the calling function knows about the failure and can log it.
-        throw error;
-    }
 };

@@ -1,163 +1,57 @@
 
-import { APITUBE_API_KEY, NEWSAPI_ORG_KEY, NEWS_TOPICS } from '../components/utils/constants';
+import { NEWSDATA_API_KEY } from '../constants';
 import type { NewsDataArticle } from '../types';
 
-// --- Interfaces for APITube.io (Primary Source) ---
-interface ApiTubeArticle {
-  title: string; url: string; published_at: string; summary: string | null; content: string | null;
-  image: { url: string | null; } | null; source: { name:string; };
+interface NewsDataResponse {
+  status: string;
+  totalResults: number;
+  results: NewsDataArticle[];
+  nextPage: string | null;
 }
-
-// --- Interfaces for NewsAPI.org (Fallback Source) ---
-interface NewsApiArticle {
-  title: string; url: string; publishedAt: string; source: { name: string; };
-  urlToImage: string | null; description: string | null; content: string | null;
-}
-
-// --- Helper to get date for API filtering (still used by APITube) ---
-const getTwoDaysAgoDateString = (): string => {
-    const date = new Date();
-    date.setDate(date.getDate() - 2);
-    return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD
-};
-
-
-// --- Data Mapping Functions ---
-const mapApiTubeToNewsDataArticle = (articles: ApiTubeArticle[]): NewsDataArticle[] => {
-    return articles.map(article => ({
-        title: article.title, link: article.url, pubDate: article.published_at,
-        source_id: article.source.name, image_url: article.image?.url || null,
-        description: article.summary, content: article.content || article.summary,
-    }));
-};
-
-const mapNewsApiToNewsDataArticle = (articles: NewsApiArticle[]): NewsDataArticle[] => {
-    return articles.map(article => ({
-        title: article.title, link: article.url, pubDate: article.publishedAt,
-        source_id: article.source.name, image_url: article.urlToImage,
-        description: article.description, content: article.content || article.description,
-    }));
-};
-
-
-// --- Fetching Logic for Each Service using a more reliable proxy and headers ---
-
-const fetchFromApiTube = async (topic: typeof NEWS_TOPICS[0]): Promise<NewsDataArticle[]> => {
-  const PROXY_PREFIX = 'https://corsproxy.io/?';
-  const BASE_URL = 'https://api.apitube.io/v1/news/everything';
-  const twoDaysAgo = getTwoDaysAgoDateString();
-  
-  // Use the new dynamic language property from the topic config.
-  const { q, limit, lang } = topic.apitube;
-  const params = new URLSearchParams({
-      'api_key': APITUBE_API_KEY,
-      'limit': limit,
-      'language': lang || 'en', // Use configured language, fallback to 'en'
-      'from': twoDaysAgo,
-      'q': q,
-  });
-  
-  const targetUrl = `${BASE_URL}?${params.toString()}`;
-  const finalUrl = `${PROXY_PREFIX}${encodeURIComponent(targetUrl)}`;
-  
-  try {
-    const response = await fetch(finalUrl);
-    if (!response.ok) {
-        try {
-            const errorData = await response.json();
-            const errorMessage = errorData?.error?.message || errorData?.message || JSON.stringify(errorData);
-            throw new Error(`API request failed with status ${response.status}: ${errorMessage}`);
-        } catch (e) {
-            throw new Error(`API request failed with status ${response.status} and could not parse the error response body.`);
-        }
-    }
-
-    const apiData = await response.json();
-    
-    let articles: ApiTubeArticle[] | undefined;
-    if (apiData && Array.isArray(apiData.data)) articles = apiData.data;
-    else if (apiData && Array.isArray(apiData.results)) articles = apiData.results;
-    else if (apiData && Array.isArray(apiData.articles)) articles = apiData.articles;
-    else if (Array.isArray(apiData)) articles = apiData;
-
-    if (articles) {
-        return mapApiTubeToNewsDataArticle(articles);
-    }
-    
-    throw new Error(`Unexpected format in APITube response. Keys found: ${Object.keys(apiData).join(', ')}`);
-
-  } catch (error) {
-    console.error(`APITube request for '${topic.type}' failed:`, error);
-    return []; // Return empty array on failure to ensure process continues.
-  }
-};
-
-const fetchFromNewsApi = async (topic: typeof NEWS_TOPICS[0]): Promise<NewsDataArticle[]> => {
-    const PROXY_PREFIX = 'https://corsproxy.io/?';
-    const { endpoint, params: topicParams } = topic.newsapi;
-    const BASE_URL = `https://newsapi.org/v2/${endpoint}`;
-
-    const params = new URLSearchParams({
-        apiKey: NEWSAPI_ORG_KEY,
-        ...topicParams
-    });
-
-    const targetUrl = `${BASE_URL}?${params.toString()}`;
-    const finalUrl = `${PROXY_PREFIX}${encodeURIComponent(targetUrl)}`;
-
-    try {
-        const response = await fetch(finalUrl);
-
-        if (!response.ok) {
-            throw new Error(`API request failed with status ${response.status}`);
-        }
-
-        const apiData = await response.json();
-
-        if (apiData.status !== 'ok') {
-            throw new Error(`NewsAPI.org API Error: ${apiData.message}`);
-        }
-        
-        if (!apiData || !Array.isArray(apiData.articles)) throw new Error('Unexpected format from NewsAPI.org.');
-        return mapNewsApiToNewsDataArticle(apiData.articles);
-    } catch (error) {
-        console.error(`NewsAPI.org request for '${topic.type}' failed:`, error);
-        return []; // Return empty array on failure
-    }
-};
 
 /**
- * Fetches news from both APITube and NewsAPI for a list of topics, then
- * combines and deduplicates them into a single large list.
- * @returns A promise that resolves with a large, combined array of unique news articles.
+ * --- NEWS FETCHING STRATEGY ---
+ * This function fetches news from Bangladesh for a specific category using the `country` filter.
+ * This approach is more robust than specifying a fixed list of domains, as it queries all sources
+ * the news API has for Bangladesh, preventing errors related to unrecognized or changed domain names.
  */
-export const fetchAllNewsFromSources = async (): Promise<NewsDataArticle[]> => {
-    console.log("Starting to fetch news from all sources based on defined topics...");
-    const promises: Promise<NewsDataArticle[]>[] = [];
+export const fetchLatestBangladeshiNews = async (category: string): Promise<NewsDataArticle[]> => {
+  // Use the 'country' parameter to fetch news from all available sources in Bangladesh.
+  // Add size=10 to get a larger pool of articles for the AI to choose from.
+  const countryCode = 'bd';
+  const url = `https://newsdata.io/api/1/news?apikey=${NEWSDATA_API_KEY}&country=${countryCode}&language=en&image=1&category=${category}&size=10`;
 
-    // Create all fetch promises to run in parallel based on NEWS_TOPICS
-    for (const topic of NEWS_TOPICS) {
-        promises.push(fetchFromApiTube(topic));
-        promises.push(fetchFromNewsApi(topic));
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      // If the API returns a non-2xx status, parse the JSON for more detailed error info.
+      const errorData = await response.json();
+      throw new Error(`News API request failed with status ${response.status}: ${errorData.results?.message || response.statusText}`);
     }
 
-    const results = await Promise.all(promises);
-    
-    // Flatten the array of arrays into a single array
-    const allArticles = results.flat();
-    
-    console.log(`Fetched a total of ${allArticles.length} articles before deduplication.`);
+    const data: NewsDataResponse = await response.json();
+    if (data.status === 'error' || !data.results) {
+        throw new Error(`News API returned an error in its response body: ${JSON.stringify(data)}`);
+    }
 
-    // Deduplicate articles based on the link to avoid sending the same story to the AI
-    const uniqueArticlesMap = new Map<string, NewsDataArticle>();
-    allArticles.forEach(article => {
-        if (article.link && !uniqueArticlesMap.has(article.link)) {
-            uniqueArticlesMap.set(article.link, article);
-        }
-    });
+    // --- Post-Fetch Filtering ---
+    // Even with `image=1`, some results might lack a usable image_url or content.
+    // This step ensures we only process articles that are complete enough for our automation.
+    const validArticles = data.results.filter(
+      (article) => article.image_url && article.link && (article.content || article.description)
+    );
 
-    const uniqueArticles = Array.from(uniqueArticlesMap.values());
-    console.log(`Returning ${uniqueArticles.length} unique articles for analysis.`);
-    
-    return uniqueArticles;
+    if (validArticles.length === 0) {
+      console.warn(`No suitable news articles with images found for category "${category}" from Bangladesh.`);
+    }
+
+    // Return all valid articles. The main application logic will now send this entire list
+    // to the AI for efficient, single-call analysis.
+    return validArticles;
+
+  } catch (error) {
+    console.error("Failed to fetch news:", error);
+    // Re-throw the error to be caught by the main try-catch block in App.tsx.
+    throw error;
+  }
 };

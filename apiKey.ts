@@ -1,10 +1,5 @@
-// ----------------------------------------------------------------------------------
-// DEPRECATED - This file is no longer in use.
-// ----------------------------------------------------------------------------------
-// The application now uses an environment variable to handle the API key
-// for better security and to comply with deployment best practices.
-//
-// Please set the `API_KEY` environment variable in your execution environment.
-//
-// ----------------------------------------------------------------------------------
-export const GEMINI_API_KEY = 'THIS_IS_DEPRECATED_USE_API_KEY_ENV_VAR';
+// WARNING: This file contains a hardcoded API key.
+// This is a major security risk and is strongly discouraged.
+// It is highly recommended to use environment variables instead.
+// Anyone with access to your public repository will be able to see and use this key, potentially incurring costs on your account.
+export const GEMINI_API_KEY = 'AIzaSyAp0A5k9v_03To0RNieHAhAPGEc_1gEuz4';
